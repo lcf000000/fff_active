@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zFloatWindow 激活码生成</title>
+<style>
+  body{font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:#f3f4f6;margin:0;color:#111}
+  .box{max-width:640px;margin:40px auto;background:#fff;border-radius:14px;padding:28px 32px;box-shadow:0 2px 12px #0001}
+  h1{font-size:22px;margin:0 0 4px} .sub{color:#666;font-size:13px;margin-bottom:22px}
+  label{font-size:14px;color:#444} input[type=text]{width:100%;box-sizing:border-box;font:600 20px/1.4 ui-monospace,Consolas,monospace;
+    letter-spacing:1px;padding:10px 12px;margin:6px 0 4px;border:1px solid #bbb;border-radius:8px;text-transform:uppercase}
+  .hint{font-size:12px;color:#888;min-height:18px} .err{color:#c62828}
+  button{font-size:16px;padding:10px 22px;border:0;border-radius:8px;background:#1565c0;color:#fff;cursor:pointer;margin-top:10px}
+  button.sec{background:#e3f2fd;color:#1565c0;margin-left:8px}
+  #out{display:none;margin-top:22px;padding:16px;background:#f1f8e9;border-radius:10px}
+  #code{font:600 18px/1.6 ui-monospace,Consolas,monospace;word-break:break-all;user-select:all}
+  a{color:#1565c0;font-size:13px}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>zFloatWindow 激活码生成</h1>
+  <div class="sub">输入车辆 VIN（17 位）。若 APP 显示的是“机器码”（MC 开头），也可以直接填机器码。</div>
+  <label for="vin">VIN / 机器码</label>
+  <input id="vin" type="text" maxlength="30" autocomplete="off" spellcheck="false" placeholder="例如 LXXXXXXXXXXXXXXXX">
+  <div class="hint" id="hint"></div>
+  <button id="go">生成激活码</button><a href="/api/history" target="_blank" style="margin-left:14px">历史记录</a>
+  <div id="out">
+    <div style="font-size:13px;color:#558b2f;margin-bottom:6px">激活码（整段复制，粘贴到 APP 的激活框；连字符可有可无）</div>
+    <div id="code"></div>
+    <button id="copy">复制</button><button class="sec" id="again">再生成一个</button>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id), vin=$('vin'), hint=$('hint');
+function norm(s){return s.replace(/[\s\-_]/g,'').toUpperCase();}
+function check(){
+  const v=norm(vin.value);
+  if(!v){hint.textContent='';hint.className='hint';return false;}
+  const okVin=/^[A-HJ-NPR-Z0-9]{17}$/.test(v), okMc=/^MC[A-Z2-7]{16}$/.test(v);
+  if(okVin||okMc){hint.textContent=(okVin?'VIN':'机器码')+' 格式正确（'+v.length+' 位）';hint.className='hint';return true;}
+  hint.textContent='格式不对：VIN 必须 17 位，只能是大写字母和数字，且不含 I、O、Q（当前 '+v.length+' 位）';
+  hint.className='hint err';return false;
+}
+vin.addEventListener('input',check);
+vin.addEventListener('keydown',e=>{if(e.key==='Enter')$('go').click();});
+$('go').onclick=async()=>{
+  if(!check()){vin.focus();return;}
+  const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'fff'},
+    body:JSON.stringify({vin:norm(vin.value)})});
+  const j=await r.json();
+  if(!j.ok){hint.textContent=j.error;hint.className='hint err';return;}
+  $('code').textContent=j.code;$('out').style.display='block';$('copy').textContent='复制';
+};
+$('copy').onclick=async()=>{
+  const t=$('code').textContent;
+  try{await navigator.clipboard.writeText(t);}catch(e){
+    const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();}
+  $('copy').textContent='已复制 ✓';
+};
+$('again').onclick=()=>{$('out').style.display='none';vin.value='';hint.textContent='';vin.focus();};
+</script>
+</body>
+</html>

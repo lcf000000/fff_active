@@ -1,0 +1,11 @@
+services:
+  fff-active:
+    build: .
+    image: fff-active:latest
+    container_name: fff-active
+    restart: unless-stopped
+    env_file: .env          # 里面放 FFF_ACTIVE_SECRET 和 ADMIN_PASSWORD，见 .env.example
+    ports:
+      - "8080:8080"         # 建议前面再放一层 HTTPS 反代（Caddy/Nginx），不要把 HTTP 直接暴露公网
+    volumes:
+      - ./data:/data        # 历史记录 history.log
