@@ -25,9 +25,14 @@
   <label for="vin">VIN / 机器码</label>
   <input id="vin" type="text" maxlength="30" autocomplete="off" spellcheck="false" placeholder="例如 LXXXXXXXXXXXXXXXX">
   <div class="hint" id="hint"></div>
+  <div style="margin:10px 0 2px;font-size:14px;color:#444">激活码类型</div>
+  {% if 'ed' in modes %}<label style="display:block;margin:4px 0"><input type="radio" name="mode" value="ed" {{ 'checked' if modes[0]=='ed' else '' }}>
+    标准码（Ed25519 签名，86 字符）<span style="color:#888;font-size:12px"> —— 防伪造：APP 里只有公钥</span></label>{% endif %}
+  {% if 'mac' in modes %}<label style="display:block;margin:4px 0"><input type="radio" name="mode" value="mac" {{ 'checked' if modes[0]=='mac' else '' }}>
+    紧凑码（HMAC，20 字符 → XXXXX-XXXXX-XXXXX-XXXXX）<span style="color:#888;font-size:12px"> —— 短，但密钥在 APK 里可被逆向提取，且 APP 需用兼容构建</span></label>{% endif %}
   <button id="go">生成激活码</button><a href="/api/history" target="_blank" style="margin-left:14px">历史记录</a>
   <div id="out">
-    <div style="font-size:13px;color:#558b2f;margin-bottom:6px">激活码（整段复制，粘贴到 APP 的激活框；连字符可有可无）</div>
+    <div style="font-size:13px;color:#558b2f;margin-bottom:6px">激活码（整段复制，粘贴到 APP 的激活框）<span id="len"></span></div>
     <div id="code"></div>
     <button id="copy">复制</button><button class="sec" id="again">再生成一个</button>
   </div>
@@ -48,10 +53,10 @@ vin.addEventListener('keydown',e=>{if(e.key==='Enter')$('go').click();});
 $('go').onclick=async()=>{
   if(!check()){vin.focus();return;}
   const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'fff'},
-    body:JSON.stringify({vin:norm(vin.value)})});
+    body:JSON.stringify({vin:norm(vin.value),mode:(document.querySelector('input[name=mode]:checked')||{}).value})});
   const j=await r.json();
   if(!j.ok){hint.textContent=j.error;hint.className='hint err';return;}
-  $('code').textContent=j.code;$('out').style.display='block';$('copy').textContent='复制';
+  $('code').textContent=j.code;$('len').textContent='（'+j.length+' 个字符，'+(j.mode==='ed'?'标准码':'紧凑码')+'）';$('out').style.display='block';$('copy').textContent='复制';
 };
 $('copy').onclick=async()=>{
   const t=$('code').textContent;

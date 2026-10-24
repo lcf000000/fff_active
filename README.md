@@ -1,8 +1,15 @@
 # fff_active：zFloatWindow 激活码生成器
 
-给 zFloatWindow（≥0.7.0）生成**离线激活码**的小网页服务。输入车辆 VIN（或 APP 显示的机器码）→ 生成激活码 → 把码发给用户，用户粘贴到 APP 设置页的“授权”卡片里点“激活”即可，**APP 全程不联网**。
+给 zFloatWindow（≥0.7.0）生成**离线永久激活码**的小网页服务。输入车辆 VIN（或 APP 显示的机器码）→ 生成激活码 → 发给用户，用户粘贴到 APP 设置页的“授权”卡片点“激活”即可，**APP 全程不联网**。激活码与 VIN 绑定，永久有效；清数据/重装后用同一个码可以再次激活。
 
-- 码格式：AES-256-GCM 加密的小载荷（魔数、产品号、签发时间、VIN 的 hash），base32 编码，每 5 位一组用 `-` 连接，共 17 组。详见 [SPEC.md](SPEC.md)。
+- **两种码，可选**（详见 [SPEC.md](SPEC.md)）：
+
+  | 类型 | 长度 | 防伪造 | 说明 |
+  |---|---|---|---|
+  | **标准码（Ed25519，默认）** | **86 字符**（无分隔符，区分大小写） | **强**：私钥只在本服务，APK 里只有公钥 | 提取 APK 也造不了码 |
+  | **紧凑码（HMAC）** | **20 字符**（显示 23 字符 `XXXXX-XXXXX-XXXXX-XXXXX`） | **弱**：对称密钥必须编进 APK | 短、好发；有逆向能力的人能提出密钥自己造码；APK 要用 `-PfffActiveMode=mac`（或 `both`）构建 |
+
+- 码里**不含 VIN 和时间**，同一 VIN 每次生成结果相同（确定性）。
 - 不需要数据库；可选的历史记录写在 `data/history.log`。
 - 栈：Python 3.12 + Flask + cryptography，gunicorn 运行，Docker 部署。
 
@@ -12,39 +19,54 @@
 git clone https://github.com/lcf000000/fff_active.git
 cd fff_active
 cp .env.example .env
-# 生成密钥（64 位十六进制）并填进 .env 的 FFF_ACTIVE_SECRET；再设置 ADMIN_PASSWORD
+# 1) 生成 Ed25519 私钥种子（64 位十六进制），填进 .env 的 FFF_ACTIVE_ED_SEED
 python3 -c "import secrets;print(secrets.token_hex(32))"
+# 2) （可选）要紧凑码，再生成一个 FFF_ACTIVE_SECRET；不要就留空
+# 3) 设置 ADMIN_PASSWORD
 vi .env
 docker compose up -d --build
+# 4) 取公钥，构建 APK 时用（见下）
+docker compose run --rm fff-active python -m fffactive.cli --pubkey
 # 浏览器打开 http://服务器IP:8080 ，用户名 admin（可用 ADMIN_USER 改），密码就是 ADMIN_PASSWORD
 ```
+
+### 构建 APK 需要的东西（zFloatWindow 仓库）
+- 标准码（默认 `ed` 模式）：构建时提供 `FFF_ACTIVE_ED_PUBLIC`（上面 `--pubkey` 打印的 64 位 hex；它是公钥，不是秘密）。
+- 紧凑码：`-PfffActiveMode=mac`（只认紧凑码）或 `both`，并提供与服务端相同的 `FFF_ACTIVE_SECRET`。
+- 取值来源优先级：`-P<名字>` > 环境变量 > 文件（`-PfffActiveEnv=路径` / 环境变量 `FFF_ACTIVE_ENV` / `<仓库>/secrets/fff_active.env`，每行 `KEY=value`，该目录已 gitignore）。缺少所需密钥时构建直接失败。
 
 ### 环境变量
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
-| `FFF_ACTIVE_SECRET` | 是 | 64 位十六进制（32 字节）。**必须和 APK 构建时用的是同一个值**，否则 APP 校验不过 |
-| `ADMIN_PASSWORD` | 是 | 网页 HTTP Basic 登录密码，至少 8 位，不能是 `change-me` 之类的示例值（否则服务拒绝启动） |
+| `FFF_ACTIVE_ED_SEED` | 标准码必填 | Ed25519 私钥种子，64 位十六进制。**只放服务器**，不要进 APK、不要提交 |
+| `FFF_ACTIVE_SECRET` | 紧凑码必填 | 64 位十六进制。和 APK 构建时用的是同一个值。留空则网页不提供紧凑码 |
+| `ADMIN_PASSWORD` | 是 | 网页 HTTP Basic 登录密码，至少 8 位，不能是 `change-me` 之类（否则拒绝启动） |
 | `ADMIN_USER` | 否 | 登录用户名，默认 `admin` |
 | `DATA_DIR` | 否 | 历史记录目录，默认 `data`（Docker 里是 `/data`，compose 已挂载 `./data`） |
+
+两个密钥至少要配一个，否则服务拒绝启动。
 
 ## 使用
 
 1. 用户在 APP 设置页顶部“授权”卡片里看到 **VIN**（读不到时显示 **机器码** `MC-XXXX-XXXX-XXXX-XXXX`），发给你。
-2. 你在网页里粘贴 VIN / 机器码（页面会即时检查格式：VIN 必须 17 位、大写字母数字、不含 I/O/Q），点“生成激活码”，点“复制”。
+2. 你在网页里粘贴 VIN / 机器码（页面即时检查格式：VIN 必须 17 位、大写字母数字、不含 I/O/Q），选择码类型，点“生成激活码”，点“复制”。
 3. 把码发给用户；用户粘贴到 APP 里点“激活”。激活码与 VIN（或机器码）绑定：换一辆车用不了。
-4. 页面上的“历史记录”链接可以看最近 200 条（时间、类型、VIN、码、来源 IP）。
+4. “历史记录”链接可看最近 200 条（时间、类型、VIN、码、来源 IP）。
 
 命令行也可以出码：
 
 ```bash
-FFF_ACTIVE_SECRET=<64位hex> python -m fffactive.cli LSJA24U62JG269181
+FFF_ACTIVE_ED_SEED=<64位hex> python -m fffactive.cli LSJA24U62JG269181          # 标准码
+FFF_ACTIVE_SECRET=<64位hex>  python -m fffactive.cli LSJA24U62JG269181 mac      # 紧凑码
+FFF_ACTIVE_ED_SEED=<64位hex> python -m fffactive.cli --pubkey                   # 打印公钥
 ```
 
-示例（**仅示意**，用的是公开的测试密钥 + 测试 VIN，不是真实密钥）：
+示例（**仅示意**：公开的测试密钥 + 测试 VIN `LSJA24U62JG269181`，不是真实密钥）：
 
 ```
-AEAAC-AQDAQ-CQMBY-IBEFA-XAXWK-6EDIK-N5VNX-TMLD7-UCYOX-IUUER-7ODQB-MHKVU-3KGZ6-3ORIJ-RNLGO-QEJRM-5AND2
+标准码（86）：n2Xux9Ht302nhl1yyLJta1EJn67hDI9NHZ5Q2D9gZBfOlCiFPf5qSbcO_NijvQVkuuXv5CXexbsi_zpPXtNfCA
+紧凑码（23）：I754G-OQF2J-OZ3N4-WUZDA
 ```
 
 ## 测试
@@ -54,15 +76,16 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m unittest discover -s tests -t . -v
 ```
 
-- `test_codec.py`：往返、容错输入、错 VIN/错密钥、逐字符篡改、VIN 校验、测试向量复现。
-- `test_web.py`：登录、CSRF 头、生成结果能被 codec 校验、非法 VIN、弱密码拒绝启动。
-- `test_cross_java.py`：把 zFloatWindow 里的 `ActivationCodec.java`（APK 实际用的类）原样编译，和 Python **互相**校验（Python 出的码 Java 验、Java 出的码 Python 验、测试向量逐字符一致）。需要 `javac`，并通过环境变量 `ZFW_CODEC` 指向 `ActivationCodec.java`（默认找 `../zFloatWindow/app/src/main/java/com/fff/zfloatwindow/ActivationCodec.java`），找不到就跳过。
+- `test_codec.py`：两种码的往返/格式/确定性、容错输入、错 VIN/错产品号/错密钥、逐字符篡改、类型不被支持、VIN 校验、测试向量复现。
+- `test_web.py`：登录、CSRF 头、两种模式生成的码都能被 codec 校验、模式未配置时拒绝、非法 VIN、弱密码拒绝启动。
+- `test_cross_java.py`：把 zFloatWindow 里的 `ActivationCodec.java` + `Ed25519.java`（APK 实际用的类）原样编译，和 Python **互相**校验：Python 出的 Ed25519/HMAC 码 Java 验、Java 出的紧凑码 Python 验、测试向量、**RFC 8032 官方 Ed25519 向量**、篡改/换 VIN/换产品号/换私钥必须失败。需要 `javac`，并通过 `ZFW_SRC` 指向 APK 源码目录（默认找 `../zFloatWindow/app/src/main/java/com/fff/zfloatwindow`），找不到就跳过。
 
 ## 安全说明（请读）
 
-- **AES 是对称加密：能生成码的密钥必须同时放在 APP 里**。APK 里的密钥做了拆分+掩码混淆，但这只是提高门槛，**有逆向能力的人能把密钥提出来并自己造码**。这是“离线 + AES”方案固有的局限，不是实现 bug。
-- 想真正防“造码”：改用**非对称签名（如 Ed25519）**——生成器持有私钥，APP 里只放公钥，提出公钥也造不了码。代价是码更长（签名 64 字节 + 载荷 ≈ 120 字符），且 Android 9（API 28）自带的 JCE 没有 Ed25519，APP 需要内置一个小的验签实现。本仓库默认按需求用 AES，未实现该变体；如需要可以在 SPEC 的 v2 里加。
-- 真实的 `FFF_ACTIVE_SECRET` 只放在服务器的 `.env` 和你本机构建 APK 的未入库文件里。`.env`、`data/`、`secrets/` 已在 `.gitignore`。**泄漏密钥 = 任何人都能造码**；泄漏后只能换密钥并重新发版（旧码全部作废）。
+- **标准码（Ed25519）**：私钥只在本服务，APK 里只有公钥，提取 APK 也无法造码——这是默认和推荐。代价是码长 86 字符，需要复制粘贴（页面有“复制”按钮），Android 9 的 JCE 没有 Ed25519，所以 APK 内置了一个纯 Java 验签实现（已用 RFC 8032 向量和 Python 交叉验证）。
+- **紧凑码（HMAC）**：对称密钥必须同时放在 APK 里。APK 里的密钥做了拆分+掩码混淆，但这只是提高门槛，**有逆向能力的人能把密钥提出来并自己造码**。想要“短码”就要接受这个权衡；只用 `ed` 模式构建的 APK 里没有任何对称密钥。
+- 真实密钥只放在服务器的 `.env` 和你本机构建 APK 的未入库文件里。`.env`、`data/`、`secrets/` 已在 `.gitignore`。**私钥泄漏 = 任何人都能造码**；泄漏后只能换密钥并重新发版（旧码全部作废）。
 - 网页用 HTTP Basic 登录，**务必放在 HTTPS 反向代理后面**（Caddy/Nginx），否则密码明文传输。登录失败有 0.5 s 延迟；生成接口要求自定义请求头防 CSRF。
-- 激活码里不含 VIN 明文（只有 16 字节 hash），但历史记录文件里有 VIN 和码，注意保护 `data/`。
-- 同一个 VIN 可以生成多次，每次的码不同（随机 nonce），都有效；本服务没有“吊销”（离线方案做不到）。
+- 历史记录文件里有 VIN 和码，注意保护 `data/`。
+- 同一个 VIN 每次生成的码相同；本服务没有“吊销”（离线方案做不到）。
+- 离线方案无法阻止“同一个码被用在同一辆车的多台设备”之外的复制，但码绑定 VIN，换车无效。
