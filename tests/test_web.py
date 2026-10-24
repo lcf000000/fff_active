@@ -63,8 +63,51 @@ class WebTest(unittest.TestCase):
         self.assertEqual(c.post("/api/generate", json={"vin": VIN}, headers=h).status_code, 200)
         self.assertEqual(c.post("/api/generate", json={"vin": VIN, "mode": "mac"}, headers=h).status_code, 400)
         self.assertNotIn("紧凑码（HMAC".encode(), c.get("/", headers=auth()).data)
-        with self.assertRaises(Exception):
-            create_app("", PW, self.tmp.name, "")                    # 两个密钥都没有 → 拒绝启动
+
+    def test_public_key_shown_only_public(self):
+        html = self.c.get("/", headers=auth()).get_data(as_text=True)
+        self.assertIn("Ed25519 公钥", html)
+        self.assertIn(PUB.hex(), html)                    # 与 APK 构建期望的 FFF_ACTIVE_ED_PUBLIC 格式一致：64 位小写 hex
+        self.assertIn("copypub", html)
+        self.assertNotIn(SEED_HEX, html)                  # 私钥种子绝不出现
+        self.assertNotIn(SECRET_HEX, html)                # 紧凑码密钥也不出现
+        self.assertNotIn('class="banner"', html)
+        for path in ("/api/history", "/healthz"):
+            self.assertNotIn(SEED_HEX, self.c.get(path, headers=auth()).get_data(as_text=True))
+
+    def test_seed_only_works(self):
+        c = create_app("", PW, self.tmp.name, SEED_HEX).test_client()
+        html = c.get("/", headers=auth()).get_data(as_text=True)
+        self.assertIn(PUB.hex(), html)
+        self.assertNotIn('class="banner"', html)
+        self.assertNotIn("紧凑码（HMAC", html)
+
+    def test_missing_or_invalid_seed_banner(self):
+        for bad in ("", "zz" * 32, "ab" * 31, "ab" * 33):
+            c = create_app("", PW, self.tmp.name, bad).test_client()   # 不能崩溃
+            self.assertEqual(c.get("/healthz").status_code, 200)
+            r = c.get("/", headers=auth())
+            self.assertEqual(r.status_code, 200)
+            html = r.get_data(as_text=True)
+            self.assertIn('class="banner"', html)
+            self.assertIn("FFF_ACTIVE_ED_SEED", html)
+            self.assertNotIn("Ed25519 公钥（构建 APK 用）", html)
+            if bad:
+                self.assertNotIn(bad, html)               # 横幅里不泄漏值
+            g = c.post("/api/generate", json={"vin": VIN}, headers={"X-Requested-With": "fff", **auth()})
+            self.assertEqual(g.status_code, 503)
+
+    def test_invalid_secret_banner_but_ed_still_works(self):
+        c = create_app("not-hex-secret-value", PW, self.tmp.name, SEED_HEX).test_client()
+        html = c.get("/", headers=auth()).get_data(as_text=True)
+        self.assertIn("FFF_ACTIVE_SECRET 格式不对", html)
+        self.assertNotIn("not-hex-secret-value", html)
+        self.assertIn(PUB.hex(), html)
+        self.assertEqual(c.post("/api/generate", json={"vin": VIN}, headers={"X-Requested-With": "fff", **auth()}).status_code, 200)
+
+    def test_quoted_seed_tolerated(self):
+        c = create_app("", PW, self.tmp.name, '"%s"\n' % SEED_HEX).test_client()
+        self.assertIn(PUB.hex(), c.get("/", headers=auth()).get_data(as_text=True))
 
     def test_machine_code(self):
         j = self.post("MC-ABCD-EFGH-2345-6723").get_json()

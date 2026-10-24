@@ -25,13 +25,28 @@ python3 -c "import secrets;print(secrets.token_hex(32))"
 # 3) 设置 ADMIN_PASSWORD
 vi .env
 docker compose up -d --build
-# 4) 取公钥，构建 APK 时用（见下）
-docker compose run --rm fff-active python -m fffactive.cli --pubkey
 # 浏览器打开 http://服务器IP:8080 ，用户名 admin（可用 ADMIN_USER 改），密码就是 ADMIN_PASSWORD
+# 4) 登录后页面最下方的“Ed25519 公钥”就是构建 APK 要的 FFF_ACTIVE_ED_PUBLIC，点“复制公钥”即可（无需命令行）
 ```
 
+### NAS 图形界面部署（群晖 Container Manager / 威联通 / 飞牛 / Portainer 等）
+不需要命令行，也不需要 `docker compose`：
+
+1. 获取镜像：在 NAS 的 Docker 界面里用本仓库构建镜像（Dockerfile 在仓库根目录；多数 NAS 支持“从 Git/Dockerfile 构建”，或先在任意电脑上 `docker build` 后导出再导入）。
+2. 创建容器，**端口**：容器端口 `8080` → 映射一个 NAS 上的端口（例如 8080）。
+3. **环境变量**（在 NAS 容器界面的“环境变量/Environment”里逐条填；值不要加引号）：
+   - `FFF_ACTIVE_ED_SEED`：64 位十六进制私钥种子（必填）。
+   - `ADMIN_PASSWORD`：登录密码，至少 8 位（必填）。
+   - `ADMIN_USER`：可选，默认 `admin`。
+   - `FFF_ACTIVE_SECRET`：可选，只有要“紧凑码”才填；不要就别建这一项或留空。
+4. **卷（存储空间）不是必须的**：不挂卷也能正常出码，只是“历史记录”在容器重建后会丢。想保留历史就把一个 NAS 目录挂到容器的 `/data`（该目录需要容器内用户 uid 10001 可写）。
+5. 启动容器，浏览器打开 `http://NAS地址:映射端口`，输入用户名/密码。**页面上会直接显示 Ed25519 公钥**（带“复制公钥”按钮）——把它填进 APK 构建的 `FFF_ACTIVE_ED_PUBLIC`。
+6. 如果页面顶部出现**红色提示**，说明环境变量没设对（例如没填 `FFF_ACTIVE_ED_SEED`，或不是 64 位十六进制）；提示里只会写变量名和问题，不会显示任何值。按提示改好环境变量、重启容器即可。
+7. **HTTPS**：网页用 HTTP Basic 登录，密码是明文传输的。如果要从外网访问，务必放在 HTTPS 反向代理后面（NAS 自带的反向代理/Caddy/Nginx 均可），不要把 8080 直接暴露到公网；只在内网用也建议别开端口转发。
+8. 页面上只会显示**公钥**，私钥种子（`FFF_ACTIVE_ED_SEED`）和 `FFF_ACTIVE_SECRET` 在任何页面、接口、日志里都不会出现；请自己妥善保存私钥种子，丢了就只能换密钥、重新发版。
+
 ### 构建 APK 需要的东西（zFloatWindow 仓库）
-- 标准码（默认 `ed` 模式）：构建时提供 `FFF_ACTIVE_ED_PUBLIC`（上面 `--pubkey` 打印的 64 位 hex；它是公钥，不是秘密）。
+- 标准码（默认 `ed` 模式）：构建时提供 `FFF_ACTIVE_ED_PUBLIC`（登录网页后页面上显示的公钥，64 位小写 hex，也可用 `python -m fffactive.cli --pubkey` 得到；它是公钥，不是秘密）。
 - 紧凑码：`-PfffActiveMode=mac`（只认紧凑码）或 `both`，并提供与服务端相同的 `FFF_ACTIVE_SECRET`。
 - 取值来源优先级：`-P<名字>` > 环境变量 > 文件（`-PfffActiveEnv=路径` / 环境变量 `FFF_ACTIVE_ENV` / `<仓库>/secrets/fff_active.env`，每行 `KEY=value`，该目录已 gitignore）。缺少所需密钥时构建直接失败。
 
@@ -39,13 +54,13 @@ docker compose run --rm fff-active python -m fffactive.cli --pubkey
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
-| `FFF_ACTIVE_ED_SEED` | 标准码必填 | Ed25519 私钥种子，64 位十六进制。**只放服务器**，不要进 APK、不要提交 |
+| `FFF_ACTIVE_ED_SEED` | 标准码必填 | Ed25519 私钥种子，64 位十六进制。**只放服务器**，不要进 APK、不要提交。缺失或格式不对时服务照常启动，但页面顶部显示红色错误提示、不能出码 |
 | `FFF_ACTIVE_SECRET` | 紧凑码必填 | 64 位十六进制。和 APK 构建时用的是同一个值。留空则网页不提供紧凑码 |
 | `ADMIN_PASSWORD` | 是 | 网页 HTTP Basic 登录密码，至少 8 位，不能是 `change-me` 之类（否则拒绝启动） |
 | `ADMIN_USER` | 否 | 登录用户名，默认 `admin` |
 | `DATA_DIR` | 否 | 历史记录目录，默认 `data`（Docker 里是 `/data`，compose 已挂载 `./data`） |
 
-两个密钥至少要配一个，否则服务拒绝启动。
+只配 `FFF_ACTIVE_ED_SEED`（不配紧凑码）完全可用。没有任何有效密钥时页面会显示红色提示并禁用生成按钮（不会崩溃退出，方便在 NAS 界面里排查）；只有 `ADMIN_PASSWORD` 缺失/太弱才会拒绝启动。
 
 ## 使用
 
@@ -77,7 +92,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 
 - `test_codec.py`：两种码的往返/格式/确定性、容错输入、错 VIN/错产品号/错密钥、逐字符篡改、类型不被支持、VIN 校验、测试向量复现。
-- `test_web.py`：登录、CSRF 头、两种模式生成的码都能被 codec 校验、模式未配置时拒绝、非法 VIN、弱密码拒绝启动。
+- `test_web.py`：登录、公钥显示（且不泄漏私钥/紧凑码密钥）、密钥缺失/无效时的错误横幅、只配种子可用、CSRF 头、两种模式生成的码都能被 codec 校验、模式未配置时拒绝、非法 VIN、弱密码拒绝启动。
 - `test_cross_java.py`：把 zFloatWindow 里的 `ActivationCodec.java` + `Ed25519.java`（APK 实际用的类）原样编译，和 Python **互相**校验：Python 出的 Ed25519/HMAC 码 Java 验、Java 出的紧凑码 Python 验、测试向量、**RFC 8032 官方 Ed25519 向量**、篡改/换 VIN/换产品号/换私钥必须失败。需要 `javac`，并通过 `ZFW_SRC` 指向 APK 源码目录（默认找 `../zFloatWindow/app/src/main/java/com/fff/zfloatwindow`），找不到就跳过。
 
 ## 安全说明（请读）

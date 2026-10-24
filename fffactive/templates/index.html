@@ -16,11 +16,15 @@
   #out{display:none;margin-top:22px;padding:16px;background:#f1f8e9;border-radius:10px}
   #code{font:600 18px/1.6 ui-monospace,Consolas,monospace;word-break:break-all;user-select:all}
   a{color:#1565c0;font-size:13px}
+  .banner{background:#ffebee;border:1px solid #ef9a9a;color:#b71c1c;border-radius:8px;padding:10px 14px;margin:0 0 14px;font-size:14px;line-height:1.6}
+  #pub{background:#e3f2fd;border-radius:10px;padding:14px 16px;margin-top:26px}
+  #pubkey{font:600 14px/1.5 ui-monospace,Consolas,monospace;word-break:break-all;user-select:all;margin:6px 0}
 </style>
 </head>
 <body>
 <div class="box">
   <h1>zFloatWindow 激活码生成</h1>
+  {% for b in banners %}<div class="banner">⚠ {{ b }}</div>{% endfor %}
   <div class="sub">输入车辆 VIN（17 位）。若 APP 显示的是“机器码”（MC 开头），也可以直接填机器码。</div>
   <label for="vin">VIN / 机器码</label>
   <input id="vin" type="text" maxlength="30" autocomplete="off" spellcheck="false" placeholder="例如 LXXXXXXXXXXXXXXXX">
@@ -30,12 +34,20 @@
     标准码（Ed25519 签名，86 字符）<span style="color:#888;font-size:12px"> —— 防伪造：APP 里只有公钥</span></label>{% endif %}
   {% if 'mac' in modes %}<label style="display:block;margin:4px 0"><input type="radio" name="mode" value="mac" {{ 'checked' if modes[0]=='mac' else '' }}>
     紧凑码（HMAC，20 字符 → XXXXX-XXXXX-XXXXX-XXXXX）<span style="color:#888;font-size:12px"> —— 短，但密钥在 APK 里可被逆向提取，且 APP 需用兼容构建</span></label>{% endif %}
-  <button id="go">生成激活码</button><a href="/api/history" target="_blank" style="margin-left:14px">历史记录</a>
+  <button id="go"{% if not modes %} disabled style="background:#9e9e9e;cursor:not-allowed"{% endif %}>生成激活码</button><a href="/api/history" target="_blank" style="margin-left:14px">历史记录</a>
   <div id="out">
     <div style="font-size:13px;color:#558b2f;margin-bottom:6px">激活码（整段复制，粘贴到 APP 的激活框）<span id="len"></span></div>
     <div id="code"></div>
     <button id="copy">复制</button><button class="sec" id="again">再生成一个</button>
   </div>
+  {% if ed_public %}
+  <div id="pub">
+    <div style="font-size:14px;font-weight:600;color:#0d47a1">Ed25519 公钥（构建 APK 用）</div>
+    <div style="font-size:12px;color:#555">构建 zFloatWindow 时把它填到 <code>FFF_ACTIVE_ED_PUBLIC</code>。这是公钥，不是秘密，可以放心复制；私钥种子不会显示在任何地方。</div>
+    <div id="pubkey">{{ ed_public }}</div>
+    <button id="copypub">复制公钥</button>
+  </div>
+  {% endif %}
 </div>
 <script>
 const $=id=>document.getElementById(id), vin=$('vin'), hint=$('hint');
@@ -58,12 +70,13 @@ $('go').onclick=async()=>{
   if(!j.ok){hint.textContent=j.error;hint.className='hint err';return;}
   $('code').textContent=j.code;$('len').textContent='（'+j.length+' 个字符，'+(j.mode==='ed'?'标准码':'紧凑码')+'）';$('out').style.display='block';$('copy').textContent='复制';
 };
-$('copy').onclick=async()=>{
-  const t=$('code').textContent;
-  try{await navigator.clipboard.writeText(t);}catch(e){
-    const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();}
-  $('copy').textContent='已复制 ✓';
-};
+async function copyText(t){
+  try{await navigator.clipboard.writeText(t);return;}catch(e){}   // 纯 HTTP（NAS 内网）下没有 clipboard API，走备用方案
+  const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();
+}
+$('copy').onclick=async()=>{await copyText($('code').textContent);$('copy').textContent='已复制 ✓';};
+if($('copypub'))$('copypub').onclick=async()=>{await copyText($('pubkey').textContent.trim());$('copypub').textContent='已复制 ✓';};
 $('again').onclick=()=>{$('out').style.display='none';vin.value='';hint.textContent='';vin.focus();};
 </script>
 </body>
