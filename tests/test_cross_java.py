@@ -67,6 +67,28 @@ class CrossJavaTest(unittest.TestCase):
         forged = codec.generate(other_keys, "LSJA24U62JG269181", "ed")
         self.assertTrue(self.run_java("verify", "ed", pub, "LSJA24U62JG269181", forged).startswith("FAIL"))
 
+    def test_ed_code_with_dash_and_underscore_kept(self):
+        """真实 keygen 产出的、同时含 '-' 和 '_' 的 86 位码：APK 侧不能把它们当分隔符去掉；只去空白。"""
+        seed = bytes(range(1, 33))
+        keys = codec.Keys(ed_seed=seed)
+        pub = codec.ed_public_from_seed(seed).hex()
+        found = None
+        for i in range(5000):
+            vin = "LSJA24U62JG%06d" % i
+            code = codec.generate(keys, vin, "ed")
+            if "-" in code and "_" in code:
+                found = (vin, code)
+                break
+        self.assertIsNotNone(found)
+        vin, code = found
+        self.assertEqual(self.run_java("verify", "ed", pub, vin, code), "OK")
+        self.assertEqual(self.run_java("verify", "ed", pub, vin.lower(), code), "OK")   # VIN 大小写不敏感
+        # 复制粘贴时被换行/空格拆开：去空白后仍有效
+        self.assertEqual(self.run_java("verify", "ed", pub, vin, code[:30] + " " + code[30:60] + "\n" + code[60:]), "OK")
+        # 去掉 '-' 或把 '_' 换掉就不是同一个码了（长度不对/校验失败）
+        self.assertTrue(self.run_java("verify", "ed", pub, vin, code.replace("-", "")).startswith("FAIL"))
+        self.assertTrue(self.run_java("verify", "ed", pub, vin, code.replace("_", "")).startswith("FAIL"))
+
     def test_python_mac_codes_verify_in_java(self):
         rnd = random.Random(8)
         alphabet = "ABCDEFGHJKLMNPRSTUVWXYZ0123456789"
