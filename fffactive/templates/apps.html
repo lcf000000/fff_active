@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}APP 管理{% endblock %}
+{% block body %}
+  <h1>APP 管理</h1>
+  <div class="sub">每个 APP = 名称 + 唯一标识 + <b>唯一的 Ed25519 公钥</b> + 产品号。APK 构建时只放公钥（zFloatWindow：<code>FFF_ACTIVE_ED_PUBLIC</code>；CarMediaBridge：<code>-PlicensePubKeyHex</code> / <code>--pubkey</code>），
+  产品号要和 APK 里写死的一致（zFloatWindow=1，CarMediaBridge=2）。</div>
+
+  <table>
+    <tr><th>APP</th><th>公钥（可随时复制）</th><th></th></tr>
+    {% for a in apps %}
+    <tr data-slug="{{ a.slug }}">
+      <td><b>{{ a.name }}</b><br><span style="color:#888">{{ a.slug }}</span> <span class="tag">产品号 {{ a.product }}</span>
+        {% if a.source == 'env' %}<span class="tag">环境变量默认</span>{% elif a.source == 'generated' %}<span class="tag">自动生成</span>{% else %}<span class="tag">手动导入</span>{% endif %}
+        {% if not a.has_key %}<br><span class="tag warn">无私钥，无法出码</span>{% endif %}</td>
+      <td><div class="mono pub">{{ a.ed_public }}</div></td>
+      <td style="white-space:nowrap"><button class="sm copypub">复制公钥</button>
+        <button class="sm sec edit" data-name="{{ a.name }}" data-product="{{ a.product }}" data-env="{{ '1' if a.source == 'env' else '' }}">编辑</button>
+        <button class="sm danger del">删除</button></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3" style="color:#888">还没有 APP。</td></tr>
+    {% endfor %}
+  </table>
+  <div class="hint">私钥种子永远不会显示在任何页面上（创建后不可再查看）。请备份整个 data 目录（含 seeds/），丢了它，已发布 APK 里的公钥就再也无法出码。</div>
+
+  <div id="editbox" style="display:none" class="ok">
+    <b>编辑 APP</b>
+    <label>名称</label><input type="text" id="e_name" maxlength="40">
+    <label>标识（slug）</label><input type="text" id="e_slug" maxlength="32">
+    <label>产品号（1–255）</label><input type="number" id="e_product" min="1" max="255">
+    <div class="hint">公钥不能修改（换密钥请新建 APP）。改产品号会让已发出的码失效，除非 APK 也改成同一个产品号。</div>
+    <button id="e_save">保存</button><button class="sec" id="e_cancel">取消</button>
+    <div class="hint" id="e_msg"></div>
+  </div>
+
+  <h2>添加 APP</h2>
+  <label>名称</label><input type="text" id="n_name" maxlength="40" placeholder="例如 CarMediaBridge">
+  <label>标识（slug：小写字母/数字/连字符）</label><input type="text" id="n_slug" maxlength="32" placeholder="例如 carmediabridge">
+  <label>产品号（1–255，要和 APK 里的一致；zFloatWindow=1，CarMediaBridge=2）</label><input type="number" id="n_product" min="1" max="255" value="1">
+
+  <div style="margin:8px 0 2px;font-size:14px;color:#444">密钥</div>
+  <label style="display:block;margin:4px 0"><input type="radio" name="kmode" value="generate" checked> 自动生成密钥对（推荐）</label>
+  <label style="display:block;margin:4px 0"><input type="radio" name="kmode" value="import"> 手动输入公钥 + 对应的私钥种子</label>
+  <div class="note" id="note_gen">服务器会生成一对新的 Ed25519 密钥：<b>私钥种子保存在服务器数据卷里，之后不会再显示</b>；创建成功后页面显示公钥，复制到 APK 构建参数即可。</div>
+  <div id="imp" style="display:none">
+    <div class="note">为什么还要私钥种子？Ed25519 的私钥<b>不能</b>由公钥推出来，而生成激活码必须用私钥签名——只有公钥是出不了码的。
+      请一次性提交这个 APP 的“公钥 + 私钥种子”（均为 64 位十六进制）：服务器会核对“种子推出的公钥 = 你填的公钥”，核对通过才保存；
+      种子存入服务器数据卷（权限 0600；设置了 FFF_ACTIVE_STORE_KEY 时还会加密），<b>保存后不会再显示</b>。</div>
+    <label>Ed25519 公钥（64 位十六进制）</label><input type="text" class="mono" id="n_pub" maxlength="70" autocomplete="off" spellcheck="false">
+    <label>私钥种子（64 位十六进制，不会回显）</label><input type="password" class="mono" id="n_seed" maxlength="70" autocomplete="new-password" spellcheck="false">
+  </div>
+  <button id="add">添加 APP</button>
+  <div class="hint" id="n_msg"></div>
+
+  <div id="created" class="ok" style="display:none">
+    <div style="font-weight:600;color:#2e7d32"><span id="c_name"></span> 创建成功</div>
+    <div style="font-size:13px;color:#555;margin:6px 0">把下面的公钥放进 APK 构建（私钥种子已保存在服务器，不会再显示）：</div>
+    <div class="mono" id="c_pub"></div>
+    <button id="c_copy">复制公钥</button>
+    <div class="hint">也可以随时回到上面的列表复制公钥。请记得备份 data 目录。</div>
+  </div>
+{% endblock %}
+{% block script %}
+<script>
+document.querySelectorAll('tr[data-slug]').forEach(tr=>{
+  const slug=tr.dataset.slug;
+  bindCopy(tr.querySelector('.copypub'),()=>tr.querySelector('.pub').textContent.trim());
+  tr.querySelector('.del').onclick=async()=>{
+    if(!confirm('确定删除 APP “'+slug+'”？它的私钥种子会从服务器删除，已发布 APK 将无法再为它出码。'))return;
+    const j=await api('DELETE','/api/apps/'+encodeURIComponent(slug));
+    if(j.ok)location.reload();else alert(j.error||'删除失败');
+  };
+  tr.querySelector('.edit').onclick=(ev)=>{
+    const b=ev.currentTarget;
+    $('e_name').value=b.dataset.name;$('e_slug').value=slug;$('e_product').value=b.dataset.product;
+    $('e_product').disabled=!!b.dataset.env;
+    $('editbox').dataset.slug=slug;$('editbox').style.display='block';$('e_msg').textContent='';
+  };
+});
+$('e_cancel').onclick=()=>{$('editbox').style.display='none';};
+$('e_save').onclick=async()=>{
+  const j=await api('PUT','/api/apps/'+encodeURIComponent($('editbox').dataset.slug),
+    {name:$('e_name').value,slug:$('e_slug').value,product:$('e_product').value});
+  if(j.ok)location.reload();else{$('e_msg').textContent=j.error||'保存失败';$('e_msg').className='hint err';}
+};
+function kmode(){return document.querySelector('input[name=kmode]:checked').value;}
+document.querySelectorAll('input[name=kmode]').forEach(r=>r.onchange=()=>{
+  $('imp').style.display=kmode()==='import'?'block':'none';
+  $('note_gen').style.display=kmode()==='generate'?'block':'none';
+});
+$('add').onclick=async()=>{
+  const body={mode:kmode(),name:$('n_name').value,slug:$('n_slug').value,product:$('n_product').value};
+  if(body.mode==='import'){body.public_key=$('n_pub').value;body.seed=$('n_seed').value;}
+  const j=await api('POST','/api/apps',body);
+  $('n_seed').value='';
+  if(!j.ok){$('n_msg').textContent=j.error||'添加失败';$('n_msg').className='hint err';return;}
+  $('n_msg').textContent='';
+  $('c_name').textContent=j.app.name;$('c_pub').textContent=j.app.ed_public;$('created').style.display='block';
+  bindCopy($('c_copy'),()=>j.app.ed_public);
+  setTimeout(()=>{},0);
+  // 刷新列表（保留创建结果面板：先写 sessionStorage，再 reload 时恢复）
+  sessionStorage.setItem('created',JSON.stringify({name:j.app.name,pub:j.app.ed_public}));
+  location.reload();
+};
+(function(){
+  const c=sessionStorage.getItem('created');if(!c)return;sessionStorage.removeItem('created');
+  const o=JSON.parse(c);$('c_name').textContent=o.name;$('c_pub').textContent=o.pub;$('created').style.display='block';
+  bindCopy($('c_copy'),()=>o.pub);$('created').scrollIntoView();
+})();
+</script>
+{% endblock %}

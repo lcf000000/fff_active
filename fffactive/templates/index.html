@@ -1,56 +1,35 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>zFloatWindow 激活码生成</title>
-<style>
-  body{font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:#f3f4f6;margin:0;color:#111}
-  .box{max-width:640px;margin:40px auto;background:#fff;border-radius:14px;padding:28px 32px;box-shadow:0 2px 12px #0001}
-  h1{font-size:22px;margin:0 0 4px} .sub{color:#666;font-size:13px;margin-bottom:22px}
-  label{font-size:14px;color:#444} input[type=text]{width:100%;box-sizing:border-box;font:600 20px/1.4 ui-monospace,Consolas,monospace;
-    letter-spacing:1px;padding:10px 12px;margin:6px 0 4px;border:1px solid #bbb;border-radius:8px;text-transform:uppercase}
-  .hint{font-size:12px;color:#888;min-height:18px} .err{color:#c62828}
-  button{font-size:16px;padding:10px 22px;border:0;border-radius:8px;background:#1565c0;color:#fff;cursor:pointer;margin-top:10px}
-  button.sec{background:#e3f2fd;color:#1565c0;margin-left:8px}
-  #out{display:none;margin-top:22px;padding:16px;background:#f1f8e9;border-radius:10px}
-  #code{font:600 18px/1.6 ui-monospace,Consolas,monospace;word-break:break-all;user-select:all}
-  a{color:#1565c0;font-size:13px}
-  .banner{background:#ffebee;border:1px solid #ef9a9a;color:#b71c1c;border-radius:8px;padding:10px 14px;margin:0 0 14px;font-size:14px;line-height:1.6}
-  #pub{background:#e3f2fd;border-radius:10px;padding:14px 16px;margin-top:26px}
-  #pubkey{font:600 14px/1.5 ui-monospace,Consolas,monospace;word-break:break-all;user-select:all;margin:6px 0}
-</style>
-</head>
-<body>
-<div class="box">
-  <h1>zFloatWindow 激活码生成</h1>
-  {% for b in banners %}<div class="banner">⚠ {{ b }}</div>{% endfor %}
-  <div class="sub">输入车辆 VIN（17 位）。若 APP 显示的是“机器码”（MC 开头），也可以直接填机器码。</div>
+{% extends "base.html" %}
+{% block title %}激活码生成{% endblock %}
+{% block body %}
+  <h1>激活码生成</h1>
+  <div class="sub">先选择 APP，再输入车辆 VIN（17 位）；APP 显示的是“机器码”（MC 开头）时也可以直接填机器码。每个 APP 用自己的密钥和产品号出码，互不通用。</div>
+  {% if not apps %}
+  <div class="note">还没有任何 APP。请先到 <a href="/apps">APP 管理</a> 添加一个（可以自动生成密钥对）。</div>
+  {% endif %}
+  <label for="app">APP</label>
+  <select id="app">
+    {% for a in apps %}<option value="{{ a.slug }}" data-modes="{{ a.modes|join(',') }}" data-has="{{ '1' if a.has_key else '0' }}">{{ a.name }}（{{ a.slug }}，产品号 {{ a.product }}）{{ '' if a.has_key else ' ⚠ 无私钥' }}</option>{% endfor %}
+  </select>
   <label for="vin">VIN / 机器码</label>
   <input id="vin" type="text" maxlength="30" autocomplete="off" spellcheck="false" placeholder="例如 LXXXXXXXXXXXXXXXX">
   <div class="hint" id="hint"></div>
-  <div style="margin:10px 0 2px;font-size:14px;color:#444">激活码类型</div>
-  {% if 'ed' in modes %}<label style="display:block;margin:4px 0"><input type="radio" name="mode" value="ed" {{ 'checked' if modes[0]=='ed' else '' }}>
-    标准码（Ed25519 签名，86 字符）<span style="color:#888;font-size:12px"> —— 防伪造：APP 里只有公钥</span></label>{% endif %}
-  {% if 'mac' in modes %}<label style="display:block;margin:4px 0"><input type="radio" name="mode" value="mac" {{ 'checked' if modes[0]=='mac' else '' }}>
-    紧凑码（HMAC，20 字符 → XXXXX-XXXXX-XXXXX-XXXXX）<span style="color:#888;font-size:12px"> —— 短，但密钥在 APK 里可被逆向提取，且 APP 需用兼容构建</span></label>{% endif %}
-  <button id="go"{% if not modes %} disabled style="background:#9e9e9e;cursor:not-allowed"{% endif %}>生成激活码</button><a href="/api/history" target="_blank" style="margin-left:14px">历史记录</a>
-  <div id="out">
-    <div style="font-size:13px;color:#558b2f;margin-bottom:6px">激活码（整段复制，粘贴到 APP 的激活框）<span id="len"></span></div>
+  {% if any_mac %}
+  <div id="modebox" style="display:none">
+    <div style="margin:6px 0 2px;font-size:14px;color:#444">激活码类型</div>
+    <label style="display:block;margin:4px 0"><input type="radio" name="mode" value="ed" checked> 标准码（Ed25519 签名，86 字符）<span style="color:#888;font-size:12px"> —— 防伪造：APP 里只有公钥</span></label>
+    <label style="display:block;margin:4px 0"><input type="radio" name="mode" value="mac"> 紧凑码（HMAC，20 字符 → XXXXX-XXXXX-XXXXX-XXXXX）<span style="color:#888;font-size:12px"> —— 仅默认 APP；密钥在 APK 里可被逆向提取</span></label>
+  </div>
+  {% endif %}
+  <button id="go"{% if not apps %} disabled style="background:#9e9e9e;cursor:not-allowed"{% endif %}>生成激活码</button>
+  <div id="out" class="ok" style="display:none">
+    <div style="font-size:13px;color:#558b2f;margin-bottom:6px"><b id="outapp"></b> 的激活码（整段复制，粘贴到 APP 的激活框）<span id="len"></span></div>
     <div id="code"></div>
     <button id="copy">复制</button><button class="sec" id="again">再生成一个</button>
   </div>
-  {% if ed_public %}
-  <div id="pub">
-    <div style="font-size:14px;font-weight:600;color:#0d47a1">Ed25519 公钥（构建 APK 用）</div>
-    <div style="font-size:12px;color:#555">构建 zFloatWindow 时把它填到 <code>FFF_ACTIVE_ED_PUBLIC</code>。这是公钥，不是秘密，可以放心复制；私钥种子不会显示在任何地方。</div>
-    <div id="pubkey">{{ ed_public }}</div>
-    <button id="copypub">复制公钥</button>
-  </div>
-  {% endif %}
-</div>
+{% endblock %}
+{% block script %}
 <script>
-const $=id=>document.getElementById(id), vin=$('vin'), hint=$('hint');
+const vin=$('vin'), hint=$('hint'), sel=$('app');
 function norm(s){return s.replace(/[\s\-_]/g,'').toUpperCase();}
 function check(){
   const v=norm(vin.value);
@@ -60,24 +39,24 @@ function check(){
   hint.textContent='格式不对：VIN 必须 17 位，只能是大写字母和数字，且不含 I、O、Q（当前 '+v.length+' 位）';
   hint.className='hint err';return false;
 }
+function modes(){const o=sel.options[sel.selectedIndex];return o?(o.dataset.modes||'').split(',').filter(Boolean):[];}
+function syncModes(){
+  const m=modes();
+  if($('modebox'))$('modebox').style.display=m.indexOf('mac')>=0&&m.indexOf('ed')>=0?'block':'none';
+  const ed=document.querySelector('input[name=mode][value=ed]');if(ed)ed.checked=true;
+}
+sel.addEventListener('change',syncModes);syncModes();
 vin.addEventListener('input',check);
 vin.addEventListener('keydown',e=>{if(e.key==='Enter')$('go').click();});
 $('go').onclick=async()=>{
+  if(!sel.value){hint.textContent='请先选择 APP';hint.className='hint err';return;}
   if(!check()){vin.focus();return;}
-  const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'fff'},
-    body:JSON.stringify({vin:norm(vin.value),mode:(document.querySelector('input[name=mode]:checked')||{}).value})});
-  const j=await r.json();
-  if(!j.ok){hint.textContent=j.error;hint.className='hint err';return;}
+  const j=await api('POST','/api/generate',{app:sel.value,vin:norm(vin.value),mode:(document.querySelector('input[name=mode]:checked')||{}).value});
+  if(!j.ok){hint.textContent=j.error||'失败';hint.className='hint err';return;}
+  $('outapp').textContent=j.app_name;
   $('code').textContent=j.code;$('len').textContent='（'+j.length+' 个字符，'+(j.mode==='ed'?'标准码':'紧凑码')+'）';$('out').style.display='block';$('copy').textContent='复制';
 };
-async function copyText(t){
-  try{await navigator.clipboard.writeText(t);return;}catch(e){}   // 纯 HTTP（NAS 内网）下没有 clipboard API，走备用方案
-  const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';
-  document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();
-}
-$('copy').onclick=async()=>{await copyText($('code').textContent);$('copy').textContent='已复制 ✓';};
-if($('copypub'))$('copypub').onclick=async()=>{await copyText($('pubkey').textContent.trim());$('copypub').textContent='已复制 ✓';};
+bindCopy($('copy'),()=>$('code').textContent);
 $('again').onclick=()=>{$('out').style.display='none';vin.value='';hint.textContent='';vin.focus();};
 </script>
-</body>
-</html>
+{% endblock %}

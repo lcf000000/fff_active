@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}fff_active{% endblock %}</title>
+<style>
+  body{font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:#f3f4f6;margin:0;color:#111}
+  .box{max-width:760px;margin:30px auto;background:#fff;border-radius:14px;padding:26px 32px;box-shadow:0 2px 12px #0001}
+  h1{font-size:22px;margin:0 0 4px} h2{font-size:17px;margin:26px 0 8px} .sub{color:#666;font-size:13px;margin-bottom:18px;line-height:1.6}
+  nav{margin-bottom:14px;font-size:14px} nav a{margin-right:16px}
+  label{font-size:14px;color:#444}
+  input[type=text],input[type=password],input[type=number],select{width:100%;box-sizing:border-box;font-size:15px;padding:9px 11px;margin:5px 0 8px;border:1px solid #bbb;border-radius:8px;background:#fff}
+  input.mono,#vin{font:600 18px/1.4 ui-monospace,Consolas,monospace;letter-spacing:1px}
+  #vin{text-transform:uppercase}
+  .hint{font-size:12px;color:#888;min-height:18px;line-height:1.5} .err{color:#c62828}
+  button{font-size:15px;padding:9px 20px;border:0;border-radius:8px;background:#1565c0;color:#fff;cursor:pointer;margin-top:8px}
+  button.sec{background:#e3f2fd;color:#1565c0;margin-left:6px} button.danger{background:#ffebee;color:#c62828;margin-left:6px}
+  button.sm{padding:5px 12px;font-size:13px;margin-top:0}
+  a{color:#1565c0;font-size:13px}
+  .banner{background:#ffebee;border:1px solid #ef9a9a;color:#b71c1c;border-radius:8px;padding:10px 14px;margin:0 0 14px;font-size:14px;line-height:1.6}
+  .note{background:#fff8e1;border:1px solid #ffe082;color:#6d4c00;border-radius:8px;padding:10px 14px;margin:10px 0;font-size:13px;line-height:1.7}
+  .ok{background:#f1f8e9;border-radius:10px;padding:14px 16px;margin-top:16px}
+  .mono{font:600 14px/1.5 ui-monospace,Consolas,monospace;word-break:break-all}
+  table{width:100%;border-collapse:collapse;font-size:13px} th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #eee;vertical-align:top}
+  .tag{display:inline-block;font-size:11px;background:#e3f2fd;color:#1565c0;border-radius:6px;padding:1px 7px;margin-left:4px}
+  .tag.warn{background:#ffebee;color:#c62828}
+  #code{font:600 18px/1.6 ui-monospace,Consolas,monospace;word-break:break-all;user-select:all}
+</style>
+</head>
+<body>
+<div class="box">
+  <nav><a href="/">生成激活码</a><a href="/apps">APP 管理</a><a href="/api/history" target="_blank">历史记录</a></nav>
+  {% for b in banners %}<div class="banner">⚠ {{ b }}</div>{% endfor %}
+  {% block body %}{% endblock %}
+</div>
+<script>
+const $=id=>document.getElementById(id);
+async function copyText(t){
+  try{await navigator.clipboard.writeText(t);return;}catch(e){}   // 纯 HTTP（NAS 内网）下没有 clipboard API，走备用方案
+  const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();
+}
+async function api(method,url,body){
+  const r=await fetch(url,{method,headers:{'Content-Type':'application/json','X-Requested-With':'fff'},body:body?JSON.stringify(body):undefined});
+  let j={};try{j=await r.json();}catch(e){}
+  return j;
+}
+function bindCopy(btn,getText){btn.onclick=async()=>{await copyText(getText());const o=btn.textContent;btn.textContent='已复制 ✓';setTimeout(()=>btn.textContent=o,1500);};}
+</script>
+{% block script %}{% endblock %}
+</body>
+</html>

@@ -62,11 +62,11 @@ class WebTest(unittest.TestCase):
         h = {"X-Requested-With": "fff", **auth()}
         self.assertEqual(c.post("/api/generate", json={"vin": VIN}, headers=h).status_code, 200)
         self.assertEqual(c.post("/api/generate", json={"vin": VIN, "mode": "mac"}, headers=h).status_code, 400)
-        self.assertNotIn("紧凑码（HMAC".encode(), c.get("/", headers=auth()).data)
+        self.assertNotIn("紧凑码（HMAC".encode(), c.get("/", headers=auth()).data)   # 没配 FFF_ACTIVE_SECRET → 页面不出现紧凑码选项
 
     def test_public_key_shown_only_public(self):
-        html = self.c.get("/", headers=auth()).get_data(as_text=True)
-        self.assertIn("Ed25519 公钥", html)
+        html = self.c.get("/apps", headers=auth()).get_data(as_text=True)
+        self.assertIn("公钥", html)
         self.assertIn(PUB.hex(), html)                    # 与 APK 构建期望的 FFF_ACTIVE_ED_PUBLIC 格式一致：64 位小写 hex
         self.assertIn("copypub", html)
         self.assertNotIn(SEED_HEX, html)                  # 私钥种子绝不出现
@@ -77,37 +77,47 @@ class WebTest(unittest.TestCase):
 
     def test_seed_only_works(self):
         c = create_app("", PW, self.tmp.name, SEED_HEX).test_client()
-        html = c.get("/", headers=auth()).get_data(as_text=True)
+        html = c.get("/apps", headers=auth()).get_data(as_text=True)
         self.assertIn(PUB.hex(), html)
         self.assertNotIn('class="banner"', html)
-        self.assertNotIn("紧凑码（HMAC", html)
+        self.assertNotIn("紧凑码（HMAC", c.get("/", headers=auth()).get_data(as_text=True))
 
-    def test_missing_or_invalid_seed_banner(self):
+    def test_missing_or_invalid_seed(self):
+        """多 APP 之后：没有环境变量种子不再是错误（APP 可以在页面里添加）；种子格式错误仍然给红色横幅，且绝不崩溃/泄漏值。"""
         for bad in ("", "zz" * 32, "ab" * 31, "ab" * 33):
-            c = create_app("", PW, self.tmp.name, bad).test_client()   # 不能崩溃
+            with tempfile.TemporaryDirectory() as d:
+                self._check_bad_seed(bad, d)
+
+    def _check_bad_seed(self, bad, d):
+        if bad is not None:
+            c = create_app("", PW, d, bad).test_client()   # 不能崩溃
             self.assertEqual(c.get("/healthz").status_code, 200)
-            r = c.get("/", headers=auth())
-            self.assertEqual(r.status_code, 200)
-            html = r.get_data(as_text=True)
-            self.assertIn('class="banner"', html)
-            self.assertIn("FFF_ACTIVE_ED_SEED", html)
-            self.assertNotIn("Ed25519 公钥（构建 APK 用）", html)
-            if bad:
-                self.assertNotIn(bad, html)               # 横幅里不泄漏值
+            for path in ("/", "/apps"):
+                r = c.get(path, headers=auth())
+                self.assertEqual(r.status_code, 200)
+                html = r.get_data(as_text=True)
+                if bad:
+                    self.assertIn('class="banner"', html)
+                    self.assertIn("FFF_ACTIVE_ED_SEED", html)
+                    self.assertNotIn(bad, html)               # 横幅里不泄漏值
+                else:
+                    self.assertNotIn('class="banner"', html)
+                    self.assertIn("还没有", html)
             g = c.post("/api/generate", json={"vin": VIN}, headers={"X-Requested-With": "fff", **auth()})
-            self.assertEqual(g.status_code, 503)
+            self.assertEqual(g.status_code, 400)                   # 没有任何 APP
+            self.assertFalse(g.get_json()["ok"])
 
     def test_invalid_secret_banner_but_ed_still_works(self):
         c = create_app("not-hex-secret-value", PW, self.tmp.name, SEED_HEX).test_client()
         html = c.get("/", headers=auth()).get_data(as_text=True)
         self.assertIn("FFF_ACTIVE_SECRET 格式不对", html)
         self.assertNotIn("not-hex-secret-value", html)
-        self.assertIn(PUB.hex(), html)
+        self.assertIn(PUB.hex(), c.get("/apps", headers=auth()).get_data(as_text=True))
         self.assertEqual(c.post("/api/generate", json={"vin": VIN}, headers={"X-Requested-With": "fff", **auth()}).status_code, 200)
 
     def test_quoted_seed_tolerated(self):
         c = create_app("", PW, self.tmp.name, '"%s"\n' % SEED_HEX).test_client()
-        self.assertIn(PUB.hex(), c.get("/", headers=auth()).get_data(as_text=True))
+        self.assertIn(PUB.hex(), c.get("/apps", headers=auth()).get_data(as_text=True))
 
     def test_machine_code(self):
         j = self.post("MC-ABCD-EFGH-2345-6723").get_json()

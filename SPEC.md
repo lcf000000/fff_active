@@ -20,3 +20,8 @@
 `"MC" + base32(SHA256("fff-active/v1/mc|" + 稳定设备标识)[:10])`（16 个字符）。
 稳定设备标识取 `persist.device.sn`、`ro.serialno`、`ro.boot.serialno` 中非空者（`k=v|k=v` 拼接），全空才退到 `ANDROID_ID`。
 界面显示为 `MC-XXXX-XXXX-XXXX-XXXX`。（机器码绑定车机而不是车；仅在读不到 VIN 时使用。）
+
+## 多 APP 扩展（不改变码格式）
+码格式 v2 本身不变；每个 APP 有自己的 Ed25519 密钥对和**产品号**（签名消息里的 1 字节）。
+默认 APP zFloatWindow：产品号 1，消息 `"fff-active/v2/ed|\x01" + bid`，与之前逐字节相同。
+CarMediaBridge：产品号 2。别的 APP 的码即使 VIN 相同，在公钥或产品号不同的 APP 里都验不过。
